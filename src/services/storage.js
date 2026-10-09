@@ -1,8 +1,11 @@
 import { EMPTY_STATE } from "../utils/constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Guarda y carga los datos usando el puente de Electron (electron/preload.js)
+const STORAGE_KEY = "arevs-method:data:v1";
+
 export const loadData = async () => {
-  const stored = (await window.db?.load()) ?? EMPTY_STATE;
+  const serialized = await AsyncStorage.getItem(STORAGE_KEY);
+  const stored = serialized ? JSON.parse(serialized) : EMPTY_STATE;
   return {
     ...EMPTY_STATE,
     ...stored,
@@ -36,4 +39,5 @@ export const loadData = async () => {
     }),
   };
 };
-export const saveData = (state) => window.db?.save(state);
+export const saveData = (state) =>
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));

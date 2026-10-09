@@ -11,7 +11,7 @@ import { getPaymentDetails, syncPaymentRecords } from "../utils/payments";
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
-const newId = () => crypto.randomUUID();
+const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export function AppProvider({ children }) {
   const [state, setState] = useState(EMPTY_STATE);
@@ -19,13 +19,23 @@ export function AppProvider({ children }) {
   const currentMonth = todayISO().slice(0, 7);
 
   useEffect(() => {
-    loadData().then((s) => {
-      setState(s);
-      setReady(true);
-    });
+    let mounted = true;
+    loadData()
+      .then((saved) => {
+        if (mounted) setState(saved);
+      })
+      .catch(() => {
+        if (mounted) setState(EMPTY_STATE);
+      })
+      .finally(() => {
+        if (mounted) setReady(true);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
   useEffect(() => {
-    if (ready) saveData(state);
+    if (ready) saveData(state).catch(() => {});
   }, [state, ready]);
 
   useEffect(() => {
@@ -186,7 +196,7 @@ export function AppProvider({ children }) {
       setState((s) => ({ ...s, logs: s.logs.filter((l) => l.id !== id) })),
   };
   return (
-    <AppContext.Provider value={{ state, actions }}>
+    <AppContext.Provider value={{ state, actions, ready }}>
       {children}
     </AppContext.Provider>
   );

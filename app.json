@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Arevs Method",
+    "slug": "arevs-method",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "cl.arevs.method"
+    },
+    "android": {
+      "package": "cl.arevs.method",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}

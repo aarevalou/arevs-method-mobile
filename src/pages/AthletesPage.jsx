@@ -1,806 +1,188 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Alert, Modal, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useApp } from "../context/AppContext";
-import { useForm } from "../hooks/useForm";
-import { EmptyState, PageHeader } from "../components/UI";
-import PaymentDetailsModal from "../components/PaymentDetailsModal";
+import { ActionButton, Chip, DateField, EmptyState, Field, Screen, SelectField, styles, colors } from "../native/ui";
 import { PAYMENT, PLANS } from "../utils/constants";
-import { ageOf } from "../utils/helpers";
+import { ageOf, isActive } from "../utils/helpers";
+import { getPaymentDetails } from "../utils/payments";
 
-const BLANK = {
-  name: "",
-  birth: "",
-  guardian: "",
-  guardianNotApplicable: false,
-  phone: "",
-  plan: "MENSUAL_DUPLA",
-};
+const BLANK = { name: "", birth: "", guardian: "", guardianNotApplicable: false, phone: "", plan: "MENSUAL_DUPLA" };
+const money = (value) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(value);
+const PLAN_OPTIONS = Object.entries(PLANS).map(([value, plan]) => ({ value, label: `${plan.label} · ${plan.sessions} clases` }));
+const FILTERS = [
+  ["TODOS", "Todos"],
+  ["PENDIENTE", "Pendientes"],
+  ["AL_DIA", "Al día"],
+  ["ARCHIVADOS", "Archivados"],
+];
 
-const formatChileanWhatsApp = (phone) => {
-  const numbers = phone.replace(/\D/g, "");
-
-  if (numbers.length !== 9 || !numbers.startsWith("9")) {
-    return phone;
-  }
-
-  return `+56 9 ${numbers.slice(1, 5)} ${numbers.slice(5)}`;
-};
-
-export default function AthletesPage({
-  paymentFilter = "TODOS",
-  onPaymentFilterChange,
-}) {
+export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterChange = () => {} }) {
   const { state, actions } = useApp();
-  const { values, bind, reset } = useForm(BLANK);
+  const [query, setQuery] = useState("");
+  const [formVisible, setFormVisible] = useState(false);
+  const [form, setForm] = useState(BLANK);
+  const [editing, setEditing] = useState(null);
+  const [paymentAthlete, setPaymentAthlete] = useState(null);
+  const month = new Date().toISOString().slice(0, 7);
+  const normalizedQuery = query.trim().toLocaleLowerCase("es-CL");
+  const athletes = useMemo(() => state.athletes.filter((athlete) => {
+    const archived = Boolean(athlete.archivedAt);
+    const matchesFilter = paymentFilter === "ARCHIVADOS" ? archived : !archived && (paymentFilter === "TODOS" || athlete.payment === paymentFilter);
+    return matchesFilter && athlete.name.toLocaleLowerCase("es-CL").includes(normalizedQuery);
+  }), [state.athletes, paymentFilter, normalizedQuery]);
 
-  const [showModal, setShowModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [athleteToDelete, setAthleteToDelete] = useState(null);
-  const [editingAthleteId, setEditingAthleteId] = useState(null);
-  const [editValues, setEditValues] = useState(BLANK);
-  const [athleteSearch, setAthleteSearch] = useState("");
-  const [paymentAthleteId, setPaymentAthleteId] = useState(null);
-  const paymentAthlete = state.athletes.find(
-    (athlete) => athlete.id === paymentAthleteId,
-  );
-  const normalizedSearch = athleteSearch.trim().toLocaleLowerCase("es-CL");
-  const visibleAthletes = state.athletes.filter((athlete) => {
-    const isArchived = Boolean(athlete.archivedAt);
-    const matchesPayment =
-      paymentFilter === "ARCHIVADOS"
-        ? isArchived
-        : !isArchived &&
-          (paymentFilter === "TODOS" || athlete.payment === paymentFilter);
-    return (
-      matchesPayment &&
-      athlete.name.toLocaleLowerCase("es-CL").includes(normalizedSearch)
-    );
-  });
-  const editingAthlete = state.athletes.find(
-    (athlete) => athlete.id === editingAthleteId,
-  );
-
-  const openModal = () => {
-    reset();
-    setShowModal(true);
+  const closeForm = () => {
+    setFormVisible(false);
+    setEditing(null);
+    setForm(BLANK);
   };
-
-  const closeModal = () => {
-    reset();
-    setShowModal(false);
+  const openAdd = () => {
+    setEditing(null);
+    setForm(BLANK);
+    setFormVisible(true);
   };
-
-  const openDeleteModal = (athlete) => {
-    setAthleteToDelete(athlete);
-    setShowDeleteModal(true);
-  };
-
-  const closeDeleteModal = () => {
-    setAthleteToDelete(null);
-    setShowDeleteModal(false);
-  };
-
-  const confirmDelete = () => {
-    if (!athleteToDelete) return;
-
-    actions.deleteAthlete(athleteToDelete.id);
-    closeDeleteModal();
-  };
-
-  const openEditModal = (athlete) => {
-    setEditingAthleteId(athlete.id);
-    setShowModal(true);
-    setEditValues({
+  const openEdit = (athlete) => {
+    setEditing(athlete);
+    setForm({
       name: athlete.name ?? "",
       birth: athlete.birth ?? "",
       guardian: athlete.guardian ?? "",
       guardianNotApplicable: Boolean(athlete.guardianNotApplicable),
       phone: athlete.phone ?? "",
       plan: athlete.plan,
-      status: athlete.archivedAt
-        ? (athlete.statusBeforeArchive ?? "ACTIVO")
-        : athlete.status,
+      status: athlete.archivedAt ? (athlete.statusBeforeArchive ?? "ACTIVO") : athlete.status,
     });
+    setFormVisible(true);
   };
-
-  const closeEditModal = () => {
-    setEditingAthleteId(null);
-    setShowModal(false);
-    setEditValues(BLANK);
-  };
-
-  const updateEditField = (field, value) => {
-    setEditValues((current) => ({ ...current, [field]: value }));
-  };
-
-  const submitEdit = (event) => {
-    event.preventDefault();
-    if (!editingAthlete || !editValues.name.trim()) return;
-    if (!editValues.guardianNotApplicable && !editValues.guardian.trim())
+  const saveAthlete = () => {
+    if (!form.name.trim() || (!form.guardianNotApplicable && !form.guardian.trim())) {
+      Alert.alert("Revisa el formulario", "Ingresa el nombre del atleta y el apoderado, o marca No aplica.");
       return;
-
-    const sessionsUsed = Math.max(
-      0,
-      editingAthlete.allocated - editingAthlete.remaining,
-    );
-    const allocated = PLANS[editValues.plan].sessions;
-    actions.updateAthlete(editingAthlete.id, {
-      name: editValues.name.trim(),
-      birth: editValues.birth,
-      guardian: editValues.guardianNotApplicable
-        ? ""
-        : editValues.guardian.trim(),
-      guardianNotApplicable: editValues.guardianNotApplicable,
-      phone: editValues.phone,
-      plan: editValues.plan,
-      ...(editingAthlete.archivedAt
-        ? {
-            status: "INACTIVO",
-            statusBeforeArchive: editValues.status,
-          }
-        : { status: editValues.status }),
-      allocated,
-      remaining: Math.max(0, allocated - sessionsUsed),
-    });
-    closeEditModal();
-  };
-
-  const archiveEditingAthlete = () => {
-    if (!editingAthlete) return;
-    if (editingAthlete.archivedAt) {
-      actions.restoreAthlete(editingAthlete.id);
+    }
+    if (!editing) {
+      actions.addAthlete({ ...form, guardian: form.guardianNotApplicable ? "" : form.guardian.trim() });
     } else {
-      actions.archiveAthlete(editingAthlete.id);
+      const used = Math.max(0, editing.allocated - editing.remaining);
+      const allocated = PLANS[form.plan].sessions;
+      actions.updateAthlete(editing.id, {
+        ...form,
+        name: form.name.trim(),
+        guardian: form.guardianNotApplicable ? "" : form.guardian.trim(),
+        ...(editing.archivedAt ? { status: "INACTIVO", statusBeforeArchive: form.status } : { status: form.status }),
+        allocated,
+        remaining: Math.max(0, allocated - used),
+      });
     }
-    closeEditModal();
+    closeForm();
   };
-
-  const submit = (e) => {
-    e.preventDefault();
-
-    console.log("SUBMIT EJECUTADO");
-    console.log("VALUES:", values);
-
-    if (!values.name.trim()) {
-      console.log("Falta nombre");
-      return;
-    }
-
-    if (!values.guardianNotApplicable && !values.guardian.trim()) {
-      console.log("Falta apoderado");
-      return;
-    }
-
-    const athlete = {
-      ...values,
-      guardian: values.guardianNotApplicable ? "" : values.guardian.trim(),
-    };
-
-    console.log("ATLETA A AGREGAR:", athlete);
-
-    actions.addAthlete(athlete);
-
-    console.log("addAthlete ejecutado");
-
-    closeModal();
-
-    console.log("closeModal ejecutado");
+  const toggleArchive = () => {
+    if (!editing) return;
+    if (editing.archivedAt) actions.restoreAthlete(editing.id);
+    else actions.archiveAthlete(editing.id);
+    closeForm();
   };
+  const deleteAthlete = (athlete) => Alert.alert("Eliminar atleta", `Se eliminará a ${athlete.name} y sus registros asociados.`, [
+    { text: "Cancelar", style: "cancel" },
+    { text: "Eliminar", style: "destructive", onPress: () => actions.deleteAthlete(athlete.id) },
+  ]);
+  const updateForm = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
   return (
     <>
-      <PageHeader title="Atletas" />
+      <Screen eyebrow="Gestión del equipo" title="Atletas" subtitle={`${state.athletes.length} registrados · busca, edita y revisa sus pagos`}>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 9 }}>
+          <Field label="Buscar atleta" value={query} onChangeText={setQuery} placeholder="Nombre del atleta" returnKeyType="search" style={{ flex: 1 }} />
+          <ActionButton title="＋ Agregar" onPress={openAdd} style={{ minHeight: 48, paddingHorizontal: 11 }} />
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          {FILTERS.map(([value, label]) => <Chip key={value} label={label} compact selected={paymentFilter === value} onPress={() => onPaymentFilterChange(value)} />)}
+        </ScrollView>
+        {athletes.length ? athletes.map((athlete) => (
+          <View key={athlete.id} style={styles.panel}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={[styles.sectionTitle, { fontSize: 16 }]}>{athlete.name}</Text>
+                <Text style={styles.small}>{ageOf(athlete.birth)} años · {PLANS[athlete.plan].label}</Text>
+              </View>
+              <Pressable onPress={() => openEdit(athlete)} accessibilityRole="button" accessibilityLabel={`Editar ${athlete.name}`} hitSlop={10}>
+                <Ionicons name="create-outline" color={colors.muted} size={22} />
+              </Pressable>
+            </View>
+            <View style={[styles.separator]} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.small}>{athlete.guardianNotApplicable ? "Sin apoderado" : athlete.guardian || "Sin apoderado registrado"}</Text>
+                <Text style={styles.small}>{athlete.allocated - athlete.remaining} de {athlete.allocated} clases usadas · quedan {athlete.remaining}</Text>
+              </View>
+              <Pressable onPress={() => setPaymentAthlete(athlete)} style={{ flexDirection: "row", alignItems: "center", gap: 5 }} accessibilityRole="button" accessibilityLabel={`Pagos ${PAYMENT[athlete.payment]}`}>
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: athlete.payment === "AL_DIA" ? colors.green : colors.amber }} />
+                <Text style={{ color: athlete.payment === "AL_DIA" ? colors.green : colors.amber, fontWeight: "700", fontSize: 12 }}>{PAYMENT[athlete.payment]}</Text>
+              </Pressable>
+            </View>
+          </View>
+        )) : <EmptyState>{state.athletes.length ? "No hay atletas que coincidan con el filtro." : "Aún no hay atletas. Agrega el primero para comenzar."}</EmptyState>}
+      </Screen>
 
-      {/* ENCABEZADO DE ACCIONES */}
-      <div className="athletes-toolbar">
-        <div>
-          <h5 className="athletes-toolbar-title">Gestión de atletas</h5>
+      <Modal visible={formVisible} transparent animationType="slide" onRequestClose={closeForm}>
+        <View style={styles.modalShade}>
+          <View style={styles.modal}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ gap: 3 }}>
+                <Text style={styles.eyebrow}>{editing ? "Perfil del atleta" : "Nuevo registro"}</Text>
+                <Text style={styles.modalTitle}>{editing ? "Editar atleta" : "Agregar atleta"}</Text>
+              </View>
+              <Pressable onPress={closeForm} hitSlop={12} accessibilityLabel="Cerrar" accessibilityRole="button"><Ionicons name="close" size={25} color={colors.muted} /></Pressable>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 13, paddingBottom: 4 }}>
+              <Field label="Nombre completo" value={form.name} onChangeText={(value) => updateForm("name", value)} placeholder="Nombre del atleta" autoCapitalize="words" />
+              <DateField label="Fecha de nacimiento" value={form.birth} onChange={ (value) => updateForm("birth", value)} />
+              <SelectField label="Plan" value={form.plan} onValueChange={(value) => updateForm("plan", value)} items={PLAN_OPTIONS} />
+              <Field label="Nombre del apoderado" value={form.guardian} onChangeText={(value) => updateForm("guardian", value)} placeholder="Apoderado" editable={!form.guardianNotApplicable} />
+              <View style={[styles.row, { justifyContent: "space-between" }]}>
+                <Text style={styles.body}>No aplica apoderado</Text>
+                <Switch value={form.guardianNotApplicable} onValueChange={(value) => setForm((current) => ({ ...current, guardianNotApplicable: value, guardian: value ? "" : current.guardian }))} trackColor={{ true: colors.accent }} thumbColor={colors.text} />
+              </View>
+              <Field label="WhatsApp" value={form.phone} onChangeText={(value) => updateForm("phone", value.replace(/\D/g, "").slice(0, 9))} placeholder="912345678" keyboardType="phone-pad" maxLength={9} />
+              {editing ? <View style={[styles.row, { justifyContent: "space-between" }]}><Text style={styles.body}>Atleta activo</Text><Switch value={form.status === "ACTIVO"} onValueChange={(value) => updateForm("status", value ? "ACTIVO" : "INACTIVO")} trackColor={{ true: colors.accent }} thumbColor={colors.text} /></View> : null}
+            </ScrollView>
+            {editing ? <ActionButton title={editing.archivedAt ? "Restaurar atleta" : "Archivar atleta"} secondary onPress={toggleArchive} /> : null}
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <ActionButton title="Cancelar" secondary onPress={closeForm} style={{ flex: 1 }} />
+              <ActionButton title={editing ? "Guardar cambios" : "Agregar atleta"} onPress={saveAthlete} style={{ flex: 1 }} />
+            </View>
+            {editing ? <ActionButton title="Eliminar atleta" secondary destructive onPress={() => { closeForm(); deleteAthlete(editing); }} /> : null}
+          </View>
+        </View>
+      </Modal>
 
-          <p className="athletes-toolbar-description">
-            Administra los atletas registrados y sus planes.
-          </p>
-        </div>
-
-        <div className="athletes-table-tools">
-          <input
-            type="search"
-            className="form-control athlete-search"
-            placeholder="Buscar atleta"
-            aria-label="Buscar atleta por nombre"
-            value={athleteSearch}
-            onChange={(event) => setAthleteSearch(event.target.value)}
-          />
-          <select
-            className="form-select athlete-payment-filter"
-            aria-label="Filtrar atletas por estado de pago"
-            value={paymentFilter}
-            onChange={(event) => onPaymentFilterChange(event.target.value)}
-          >
-            <option value="TODOS">Todos</option>
-            <option value="PENDIENTE">Pendientes</option>
-            <option value="AL_DIA">Al día</option>
-            <option value="ARCHIVADOS">Archivados</option>
-          </select>
-        </div>
-
-        <button
-          type="button"
-          className="btn btn-primary athlete-add-button"
-          onClick={openModal}
-        >
-          <span className="athlete-add-icon">+</span>
-          Agregar atleta
-        </button>
-      </div>
-
-      {/* TABLA */}
-      {state.athletes.length ? (
-        <div className="athletes-table-wrapper">
-          <table className="table align-middle athletes-table">
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Edad</th>
-                <th>Apoderado</th>
-                <th>Plan</th>
-                <th>Clases usadas</th>
-                <th>Pago</th>
-                <th />
-              </tr>
-            </thead>
-
-            <tbody>
-              {visibleAthletes.length ? (
-                visibleAthletes.map((a) => (
-                  <tr
-                    key={a.id}
-                    className={a.status === "ACTIVO" ? "" : "athlete-inactive"}
-                  >
-                    <td>
-                      <span className="athlete-table-name">{a.name}</span>
-                    </td>
-
-                    <td>
-                      <span className="athlete-table-data">
-                        {ageOf(a.birth)}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div className="athlete-guardian">
-                        <span
-                          className={
-                            a.guardianNotApplicable
-                              ? "athlete-table-data guardian-na"
-                              : "athlete-table-data"
-                          }
-                        >
-                          {a.guardianNotApplicable
-                            ? "No aplica"
-                            : a.guardian || "—"}
-                        </span>
-
-                        {a.phone && (
-                          <span className="athlete-phone">
-                            {formatChileanWhatsApp(a.phone)}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className="athlete-plan">
-                        {PLANS[a.plan].label}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span className="athlete-table-data">
-                        {a.allocated - a.remaining}
-                        <span className="classes-total"> de {a.allocated}</span>
-                      </span>
-                    </td>
-
-                    <td>
-                      <button
-                        type="button"
-                        className={`payment-attendance athlete-payment-tag payment-attendance-${a.payment.toLowerCase()}`}
-                        onClick={() => setPaymentAthleteId(a.id)}
-                        aria-label={`Ver detalle de pagos de ${a.name}: ${PAYMENT[a.payment]}`}
-                        title="Ver detalle de pagos"
-                      >
-                        {PAYMENT[a.payment]}
-                      </button>
-                    </td>
-
-                    <td className="text-end">
-                      <div className="athlete-actions">
-                        <button
-                          type="button"
-                          className="athlete-status-button"
-                          onClick={() => openEditModal(a)}
-                        >
-                          Editar
-                        </button>
-
-                        <button
-                          type="button"
-                          className="athlete-delete-button"
-                          onClick={() => openDeleteModal(a)}
-                          aria-label={`Eliminar a ${a.name}`}
-                          title="Eliminar atleta"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="7" className="athletes-filter-empty">
-                    No hay atletas que coincidan con la búsqueda y el filtro.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <EmptyState>
-          Aún no hay atletas. Presiona "Agregar atleta" para registrar el
-          primero.
-        </EmptyState>
-      )}
-
-      {/* =====================================================
-          MODAL AGREGAR ATLETA
-          ===================================================== */}
-
-      {showModal && (
-        <div
-          className="athlete-modal-backdrop"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              if (editingAthlete) closeEditModal();
-              else closeModal();
-            }
-          }}
-        >
-          {editingAthlete && (
-            <div
-              className="athlete-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="edit-athlete-title"
-            >
-              <div className="athlete-modal-header">
-                <div>
-                  <h4 id="edit-athlete-title">Editar atleta</h4>
-                  <p>Actualiza sus datos y plan.</p>
-                </div>
-                <button
-                  type="button"
-                  className="athlete-modal-close"
-                  onClick={closeEditModal}
-                  aria-label="Cerrar edición"
-                >
-                  ×
-                </button>
-              </div>
-
-              <form onSubmit={submitEdit}>
-                <div className="athlete-modal-body">
-                  <div className="athlete-form-section">
-                    <div className="athlete-form-section-title">
-                      Información del atleta
-                    </div>
-                    <div className="row g-3">
-                      <div className="col-12">
-                        <label
-                          className="form-label"
-                          htmlFor="edit-athlete-name"
-                        >
-                          Nombre completo
-                        </label>
-                        <input
-                          id="edit-athlete-name"
-                          className="form-control"
-                          value={editValues.name}
-                          onChange={(event) =>
-                            updateEditField("name", event.target.value)
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="col-md-6">
-                        <label
-                          className="form-label"
-                          htmlFor="edit-athlete-birth"
-                        >
-                          Fecha de nacimiento
-                        </label>
-                        <input
-                          id="edit-athlete-birth"
-                          type="date"
-                          className="form-control"
-                          value={editValues.birth}
-                          onChange={(event) =>
-                            updateEditField("birth", event.target.value)
-                          }
-                        />
-                      </div>
-                      <div className="col-md-6">
-                        <label
-                          className="form-label"
-                          htmlFor="edit-athlete-plan"
-                        >
-                          Plan
-                        </label>
-                        <select
-                          id="edit-athlete-plan"
-                          className="form-select"
-                          value={editValues.plan}
-                          onChange={(event) =>
-                            updateEditField("plan", event.target.value)
-                          }
-                        >
-                          {Object.entries(PLANS).map(([key, plan]) => (
-                            <option key={key} value={key}>
-                              {plan.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="athlete-form-section">
-                    <div className="athlete-form-section-title">
-                      Información del apoderado
-                    </div>
-                    <div className="row g-3">
-                      <div className="col-md-6">
-                        <label
-                          className="form-label"
-                          htmlFor="edit-athlete-guardian"
-                        >
-                          Nombre del apoderado
-                        </label>
-                        <input
-                          id="edit-athlete-guardian"
-                          className="form-control"
-                          value={editValues.guardian}
-                          disabled={editValues.guardianNotApplicable}
-                          onChange={(event) =>
-                            updateEditField("guardian", event.target.value)
-                          }
-                          required={!editValues.guardianNotApplicable}
-                        />
-                        <label className="guardian-no-applicable">
-                          <input
-                            type="checkbox"
-                            checked={editValues.guardianNotApplicable}
-                            onChange={(event) => {
-                              const checked = event.target.checked;
-                              setEditValues((current) => ({
-                                ...current,
-                                guardianNotApplicable: checked,
-                                guardian: checked ? "" : current.guardian,
-                              }));
-                            }}
-                          />
-                          <span>No aplica</span>
-                        </label>
-                      </div>
-                      <div className="col-md-6">
-                        <label
-                          className="form-label"
-                          htmlFor="edit-athlete-phone"
-                        >
-                          WhatsApp
-                        </label>
-                        <input
-                          id="edit-athlete-phone"
-                          type="tel"
-                          inputMode="numeric"
-                          className="form-control"
-                          placeholder="912345678"
-                          maxLength={9}
-                          value={editValues.phone}
-                          onChange={(event) =>
-                            updateEditField(
-                              "phone",
-                              event.target.value.replace(/\D/g, "").slice(0, 9),
-                            )
-                          }
-                        />
-                        <div className="whatsapp-help">
-                          9 dígitos · Ej. 912345678
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="athlete-form-section">
-                    <label className="guardian-no-applicable">
-                      <input
-                        type="checkbox"
-                        checked={editValues.status === "ACTIVO"}
-                        onChange={(event) =>
-                          updateEditField(
-                            "status",
-                            event.target.checked ? "ACTIVO" : "INACTIVO",
-                          )
-                        }
-                      />
-                      <span>Atleta activo</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="athlete-modal-footer athlete-edit-footer">
-                  <button
-                    type="button"
-                    className="athlete-cancel-button"
-                    onClick={archiveEditingAthlete}
-                  >
-                    {editingAthlete.archivedAt
-                      ? "Restaurar atleta"
-                      : "Archivar atleta"}
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary athlete-save-button"
-                  >
-                    Confirmar
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-          {!editingAthlete && (
-            <div
-              className="athlete-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="add-athlete-title"
-            >
-              {/* HEADER */}
-
-              <div className="athlete-modal-header">
-                <div>
-                  <h4 id="add-athlete-title">Agregar atleta</h4>
-
-                  <p>Ingresa la información del nuevo atleta.</p>
-                </div>
-
-                <button
-                  type="button"
-                  className="athlete-modal-close"
-                  onClick={closeModal}
-                  aria-label="Cerrar"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* FORMULARIO */}
-
-              <form onSubmit={submit}>
-                <div className="athlete-modal-body">
-                  <div className="athlete-form-section">
-                    <div className="athlete-form-section-title">
-                      Información del atleta
-                    </div>
-
-                    <div className="row g-3">
-                      <div className="col-12">
-                        <label className="form-label">Nombre completo</label>
-
-                        <input
-                          className="form-control"
-                          placeholder="Ej. Daniel González"
-                          autoFocus
-                          {...bind("name")}
-                        />
-                      </div>
-
-                      <div className="col-md-6">
-                        <label className="form-label">
-                          Fecha de nacimiento
-                        </label>
-
-                        <input
-                          type="date"
-                          className="form-control"
-                          {...bind("birth")}
-                        />
-                      </div>
-
-                      <div className="col-md-6">
-                        <label className="form-label">Plan</label>
-
-                        <select className="form-select" {...bind("plan")}>
-                          {Object.entries(PLANS).map(([k, p]) => (
-                            <option key={k} value={k}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="athlete-form-section">
-                    <div className="athlete-form-section-title">
-                      Información del apoderado
-                    </div>
-
-                    <div className="row g-3">
-                      <div className="col-md-6">
-                        <label className="form-label">
-                          Nombre del apoderado
-                        </label>
-
-                        <input
-                          className="form-control"
-                          placeholder="Nombre completo"
-                          disabled={values.guardianNotApplicable}
-                          {...bind("guardian")}
-                        />
-
-                        <label className="guardian-no-applicable">
-                          <input
-                            type="checkbox"
-                            checked={values.guardianNotApplicable}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-
-                              bind("guardian").onChange({
-                                target: {
-                                  name: "guardian",
-                                  value: checked ? "" : values.guardian,
-                                },
-                              });
-
-                              bind("guardianNotApplicable").onChange({
-                                target: {
-                                  name: "guardianNotApplicable",
-                                  value: checked,
-                                },
-                              });
-                            }}
-                          />
-
-                          <span>No aplica</span>
-                        </label>
-                      </div>
-
-                      <div className="col-md-6">
-                        <label className="form-label">WhatsApp</label>
-
-                        <input
-                          type="tel"
-                          inputMode="numeric"
-                          className="form-control"
-                          placeholder="912345678"
-                          maxLength={9}
-                          value={values.phone}
-                          onChange={(e) => {
-                            const value = e.target.value
-                              .replace(/\D/g, "")
-                              .slice(0, 9);
-
-                            bind("phone").onChange({
-                              target: {
-                                name: "phone",
-                                value,
-                              },
-                            });
-                          }}
-                        />
-
-                        <div className="whatsapp-help">
-                          9 dígitos · Ej. 912345678
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* FOOTER */}
-
-                <div className="athlete-modal-footer">
-                  <button
-                    type="button"
-                    className="athlete-cancel-button"
-                    onClick={closeModal}
-                  >
-                    Cancelar
-                  </button>
-
-                  <button
-                    type="submit"
-                    className="btn btn-primary athlete-save-button"
-                  >
-                    Agregar atleta
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-        </div>
-      )}
-      {/* =====================================================
-    MODAL ELIMINAR ATLETA
-    ===================================================== */}
-
-      {showDeleteModal && athleteToDelete && (
-        <div
-          className="athlete-modal-backdrop"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              closeDeleteModal();
-            }
-          }}
-        >
-          <div
-            className="athlete-modal athlete-delete-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-athlete-title"
-          >
-            {/* HEADER */}
-
-            <div className="athlete-modal-header">
-              <div>
-                <h4 id="delete-athlete-title">¿Estás seguro?</h4>
-
-                <p>
-                  Estás a punto de eliminar a{" "}
-                  <strong>{athleteToDelete.name}</strong>.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="athlete-modal-close"
-                onClick={closeDeleteModal}
-                aria-label="Cerrar"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* FOOTER */}
-
-            <div className="athlete-modal-footer">
-              <button
-                type="button"
-                className="athlete-cancel-button"
-                onClick={closeDeleteModal}
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                className="athlete-delete-confirm-button"
-                onClick={confirmDelete}
-              >
-                Eliminar atleta
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {paymentAthlete && (
-        <PaymentDetailsModal
-          athlete={paymentAthlete}
-          onClose={() => setPaymentAthleteId(null)}
-        />
-      )}
+      <Modal visible={Boolean(paymentAthlete)} transparent animationType="slide" onRequestClose={() => setPaymentAthlete(null)}>
+        <View style={styles.modalShade}>
+          <View style={styles.modal}>
+            {paymentAthlete ? (() => {
+              const details = getPaymentDetails(paymentAthlete, state.sessions, month);
+              const pendingTotal = details.charges.filter((charge) => !charge.paid).reduce((sum, charge) => sum + charge.amount, 0);
+              const paidAll = details.charges.length > 0 && details.charges.every((charge) => charge.paid);
+              return <>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <View style={{ flex: 1, gap: 4 }}><Text style={styles.eyebrow}>Pagos · {paymentAthlete.name}</Text><Text style={styles.modalTitle}>{money(pendingTotal)} pendiente</Text></View>
+                  <Pressable onPress={() => setPaymentAthlete(null)} hitSlop={12} accessibilityLabel="Cerrar pagos"><Ionicons name="close" size={25} color={colors.muted} /></Pressable>
+                </View>
+                <ScrollView contentContainerStyle={{ gap: 10 }}>
+                  {details.charges.map((charge) => <View key={charge.key} style={[styles.panel, { padding: 12 }]}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <View style={{ flex: 1, gap: 3 }}><Text style={[styles.body, { fontWeight: "700" }]}>{charge.title}</Text><Text style={styles.small}>{charge.sessions.length ? `${charge.sessions.length} asistencia(s)` : PLANS[paymentAthlete.plan].label}</Text></View>
+                      <Text style={styles.body}>{money(charge.amount)}</Text>
+                      <Switch value={charge.paid} onValueChange={(paid) => actions.updatePaymentRecord(paymentAthlete.id, charge.key, paid)} trackColor={{ true: colors.green }} thumbColor={colors.text} />
+                    </View>
+                  </View>)}
+                </ScrollView>
+                <ActionButton title={paidAll ? "Todos los pagos al día" : "Marcar todo al día"} onPress={() => actions.markAllPaymentsPaid(paymentAthlete.id)} disabled={paidAll} />
+              </>;
+            })() : null}
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
