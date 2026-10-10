@@ -13,11 +13,16 @@
       "bundleIdentifier": "cl.arevs.method"
     },
     "android": {
-      "package": "cl.arevs.method",
-      "edgeToEdgeEnabled": true
+      "package": "cl.arevs.method"
     },
     "plugins": [
-      "expo-font"
-    ]
+      "expo-font",
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "94a7ec49-5f3f-40ba-8bca-e2919dd15a06"
+      }
+    }
   }
 }

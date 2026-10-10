@@ -1,4 +1,4 @@
-wrgfwrgwrgimport { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useApp } from "../context/AppContext";
 import { ActionButton, Chip, EmptyState, Screen, styles, colors } from "../native/ui";
@@ -25,7 +25,7 @@ export default function DashboardPage({ onViewPendingPayments }) {
   const month = todayISO().slice(0, 7);
   const metrics = dashboardMetrics(state, month);
   const active = state.athletes.filter(isActive);
-  const payments = summarizePayments(active, state.sessions, month);
+  const payments = summarizePayments(active, state.sessions, month, state.plans);
   const sessionCount = state.sessions.filter((session) => session.date.startsWith(month)).length;
   const trends = useMemo(() => recentMonths(6).map(({ key, label }) => {
     const sessions = state.sessions.filter((session) => session.date.startsWith(key));
@@ -41,7 +41,7 @@ export default function DashboardPage({ onViewPendingPayments }) {
     };
   }), [state.sessions, state.athletes]);
   const pending = active.map((athlete) => {
-    const charges = getPaymentDetails(athlete, state.sessions, month).charges.filter((charge) => !charge.paid);
+    const charges = getPaymentDetails(athlete, state.sessions, month, state.plans).charges.filter((charge) => !charge.paid);
     return {
       id: athlete.id,
       name: athlete.name,
@@ -113,7 +113,7 @@ export default function DashboardPage({ onViewPendingPayments }) {
             <Pressable key={athlete.id} onPress={onViewPendingPayments} style={({ pressed }) => [styles.row, { justifyContent: "space-between", paddingVertical: 5 }, pressed && { opacity: 0.7 }]}>
               <View style={{ flex: 1, gap: 3 }}>
                 <Text numberOfLines={1} style={[styles.body, { fontWeight: "700" }]}>{athlete.name}</Text>
-                <Text style={styles.small}>{PLANS[athlete.plan].label} · {athlete.count} {athlete.count === 1 ? "cargo" : "cargos"}</Text>
+                <Text style={styles.small}>{state.plans[athlete.plan]?.label ?? PLANS[athlete.plan]?.label ?? "Plan"} · {athlete.count} {athlete.count === 1 ? "cargo" : "cargos"}</Text>
               </View>
               <Text style={{ color: colors.amber, fontSize: 14, fontWeight: "800" }}>{money(athlete.amount)}</Text>
             </Pressable>

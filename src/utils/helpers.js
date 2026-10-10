@@ -5,12 +5,18 @@ export const isActive = (a) => a.status === "ACTIVO";
 export const ageOf = (birth) =>
   birth ? Math.floor((Date.now() - new Date(birth)) / 31557600000) : "-";
 
-export const createAthlete = (form, id) => {
-  const n = PLANS[form.plan].sessions;
+export const createAthlete = (form, id, plans = PLANS) => {
+  const plan = plans[form.plan] ?? PLANS[form.plan];
+  const n = plan.sessions;
   return {
     id,
     name: form.name.trim(),
     birth: form.birth,
+    heightCm: form.heightCm === "" || form.heightCm == null ? null : Number(form.heightCm),
+    weightKg: form.weightKg === "" || form.weightKg == null ? null : Number(form.weightKg),
+    club: form.club?.trim() ?? "",
+    courtPosition: form.courtPosition?.trim() ?? "",
+    dominantFoot: form.dominantFoot ?? "",
     guardian: form.guardian,
     guardianNotApplicable: Boolean(form.guardianNotApplicable),
     phone: form.phone,
@@ -74,4 +80,25 @@ export const dashboardMetrics = ({ athletes, sessions }, month) => {
     avgConsumed: monthly.length ? (consumed / monthly.length).toFixed(1) : "0",
     pending: active.filter((a) => a.payment !== "AL_DIA"),
   };
+};
+
+export const schedulePeriod = (schedule) => {
+  if (schedule?.period === "AM" || schedule?.period === "PM") return schedule.period;
+  if (schedule?.block === "SIN_FRANJA") return "SIN_FRANJA";
+  if (schedule?.block === "AM" || schedule?.block === "PM") return schedule.block;
+  return ["RECUPERACION", "DOMICILIO"].includes(schedule?.block) ? "SIN_FRANJA" : "";
+};
+
+export const scheduleSessionType = (schedule) =>
+  schedule?.sessionType ??
+  (["RECUPERACION", "DOMICILIO"].includes(schedule?.block) ? schedule.block : "NORMAL");
+
+export const scheduleStartTime = (schedule) => schedule?.time || schedule?.startTime || "";
+
+export const scheduleSlotKey = (schedule) => {
+  const start = scheduleStartTime(schedule);
+  const period = schedulePeriod(schedule);
+  const type = scheduleSessionType(schedule);
+  if (!period || !type || !start) return "";
+  return `${period}|${type}|${start}|${schedule.time ? "" : (schedule.endTime ?? "")}`;
 };

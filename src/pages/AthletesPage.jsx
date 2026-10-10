@@ -1,15 +1,14 @@
 import { useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useApp } from "../context/AppContext";
-import { ActionButton, Chip, DateField, EmptyState, Field, Screen, SelectField, styles, colors } from "../native/ui";
-import { PAYMENT, PLANS } from "../utils/constants";
+import { ActionButton, BottomSheetModal, Chip, DateField, EmptyState, Field, Screen, SelectField, styles, colors } from "../native/ui";
+import { PAYMENT } from "../utils/constants";
 import { ageOf, isActive } from "../utils/helpers";
 import { getPaymentDetails } from "../utils/payments";
 
-const BLANK = { name: "", birth: "", guardian: "", guardianNotApplicable: false, phone: "", plan: "MENSUAL_DUPLA" };
+const BLANK = { name: "", birth: "", heightCm: "", weightKg: "", club: "", courtPosition: "", dominantFoot: "", guardian: "", guardianNotApplicable: false, phone: "", plan: "" };
 const money = (value) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(value);
-const PLAN_OPTIONS = Object.entries(PLANS).map(([value, plan]) => ({ value, label: `${plan.label} · ${plan.sessions} clases` }));
 const FILTERS = [
   ["TODOS", "Todos"],
   ["PENDIENTE", "Pendientes"],
@@ -24,6 +23,7 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
   const [form, setForm] = useState(BLANK);
   const [editing, setEditing] = useState(null);
   const [paymentAthlete, setPaymentAthlete] = useState(null);
+  const planOptions = Object.entries(state.plans).map(([value, plan]) => ({ value, label: `${plan.label} · ${plan.sessions} clases` }));
   const month = new Date().toISOString().slice(0, 7);
   const normalizedQuery = query.trim().toLocaleLowerCase("es-CL");
   const athletes = useMemo(() => state.athletes.filter((athlete) => {
@@ -35,11 +35,11 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
   const closeForm = () => {
     setFormVisible(false);
     setEditing(null);
-    setForm(BLANK);
+    setForm({ ...BLANK, plan: Object.keys(state.plans)[0] ?? "" });
   };
   const openAdd = () => {
     setEditing(null);
-    setForm(BLANK);
+    setForm({ ...BLANK, plan: Object.keys(state.plans)[0] ?? "" });
     setFormVisible(true);
   };
   const openEdit = (athlete) => {
@@ -47,6 +47,11 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
     setForm({
       name: athlete.name ?? "",
       birth: athlete.birth ?? "",
+      heightCm: athlete.heightCm == null ? "" : String(athlete.heightCm),
+      weightKg: athlete.weightKg == null ? "" : String(athlete.weightKg),
+      club: athlete.club ?? "",
+      courtPosition: athlete.courtPosition ?? "",
+      dominantFoot: athlete.dominantFoot ?? "",
       guardian: athlete.guardian ?? "",
       guardianNotApplicable: Boolean(athlete.guardianNotApplicable),
       phone: athlete.phone ?? "",
@@ -56,18 +61,22 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
     setFormVisible(true);
   };
   const saveAthlete = () => {
-    if (!form.name.trim() || (!form.guardianNotApplicable && !form.guardian.trim())) {
-      Alert.alert("Revisa el formulario", "Ingresa el nombre del atleta y el apoderado, o marca No aplica.");
+    if (!form.name.trim() || !state.plans[form.plan] || (!form.guardianNotApplicable && !form.guardian.trim())) {
+      Alert.alert("Revisa el formulario", "Ingresa un nombre, elige un plan y completa el apoderado o marca No aplica.");
       return;
     }
     if (!editing) {
       actions.addAthlete({ ...form, guardian: form.guardianNotApplicable ? "" : form.guardian.trim() });
     } else {
       const used = Math.max(0, editing.allocated - editing.remaining);
-      const allocated = PLANS[form.plan].sessions;
+      const allocated = state.plans[form.plan].sessions;
       actions.updateAthlete(editing.id, {
         ...form,
         name: form.name.trim(),
+        heightCm: form.heightCm === "" ? null : Number(form.heightCm),
+        weightKg: form.weightKg === "" ? null : Number(form.weightKg),
+        club: form.club.trim(),
+        courtPosition: form.courtPosition.trim(),
         guardian: form.guardianNotApplicable ? "" : form.guardian.trim(),
         ...(editing.archivedAt ? { status: "INACTIVO", statusBeforeArchive: form.status } : { status: form.status }),
         allocated,
@@ -103,7 +112,7 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
             <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={[styles.sectionTitle, { fontSize: 16 }]}>{athlete.name}</Text>
-                <Text style={styles.small}>{ageOf(athlete.birth)} años · {PLANS[athlete.plan].label}</Text>
+                <Text style={styles.small}>{ageOf(athlete.birth)} años · {state.plans[athlete.plan]?.label ?? "Plan no disponible"}</Text>
               </View>
               <Pressable onPress={() => openEdit(athlete)} accessibilityRole="button" accessibilityLabel={`Editar ${athlete.name}`} hitSlop={10}>
                 <Ionicons name="create-outline" color={colors.muted} size={22} />
@@ -113,6 +122,8 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.small}>{athlete.guardianNotApplicable ? "Sin apoderado" : athlete.guardian || "Sin apoderado registrado"}</Text>
+                {athlete.club || athlete.courtPosition || athlete.dominantFoot ? <Text style={styles.small}>{[athlete.club, athlete.courtPosition, athlete.dominantFoot && `Pie ${athlete.dominantFoot}`].filter(Boolean).join(" · ")}</Text> : null}
+                {athlete.phone ? <Text style={styles.small}>WhatsApp: +56 {athlete.phone}</Text> : null}
                 <Text style={styles.small}>{athlete.allocated - athlete.remaining} de {athlete.allocated} clases usadas · quedan {athlete.remaining}</Text>
               </View>
               <Pressable onPress={() => setPaymentAthlete(athlete)} style={{ flexDirection: "row", alignItems: "center", gap: 5 }} accessibilityRole="button" accessibilityLabel={`Pagos ${PAYMENT[athlete.payment]}`}>
@@ -124,9 +135,7 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
         )) : <EmptyState>{state.athletes.length ? "No hay atletas que coincidan con el filtro." : "Aún no hay atletas. Agrega el primero para comenzar."}</EmptyState>}
       </Screen>
 
-      <Modal visible={formVisible} transparent animationType="slide" onRequestClose={closeForm}>
-        <View style={styles.modalShade}>
-          <View style={styles.modal}>
+      <BottomSheetModal visible={formVisible} onRequestClose={closeForm}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <View style={{ gap: 3 }}>
                 <Text style={styles.eyebrow}>{editing ? "Perfil del atleta" : "Nuevo registro"}</Text>
@@ -137,7 +146,14 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 13, paddingBottom: 4 }}>
               <Field label="Nombre completo" value={form.name} onChangeText={(value) => updateForm("name", value)} placeholder="Nombre del atleta" autoCapitalize="words" />
               <DateField label="Fecha de nacimiento" value={form.birth} onChange={ (value) => updateForm("birth", value)} />
-              <SelectField label="Plan" value={form.plan} onValueChange={(value) => updateForm("plan", value)} items={PLAN_OPTIONS} />
+              <View style={{ flexDirection: "row", gap: 9 }}>
+                <Field label="Estatura · cm" value={form.heightCm} onChangeText={(value) => updateForm("heightCm", value)} placeholder="Opcional" keyboardType="decimal-pad" />
+                <Field label="Peso · kg" value={form.weightKg} onChangeText={(value) => updateForm("weightKg", value)} placeholder="Opcional" keyboardType="decimal-pad" />
+              </View>
+              <Field label="Club" value={form.club} onChangeText={(value) => updateForm("club", value)} placeholder="Club o institución" />
+              <Field label="Posición de juego" value={form.courtPosition} onChangeText={(value) => updateForm("courtPosition", value)} placeholder="Posición" />
+              <SelectField label="Pie dominante" value={form.dominantFoot} onValueChange={(value) => updateForm("dominantFoot", value)} items={[{ value: "", label: "Sin especificar" }, { value: "DERECHO", label: "Derecho" }, { value: "IZQUIERDO", label: "Izquierdo" }, { value: "AMBIDIESTRO", label: "Ambidiestro" }]} />
+              <SelectField label="Plan" value={form.plan} onValueChange={(value) => updateForm("plan", value)} items={planOptions} />
               <Field label="Nombre del apoderado" value={form.guardian} onChangeText={(value) => updateForm("guardian", value)} placeholder="Apoderado" editable={!form.guardianNotApplicable} />
               <View style={[styles.row, { justifyContent: "space-between" }]}>
                 <Text style={styles.body}>No aplica apoderado</Text>
@@ -152,15 +168,11 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
               <ActionButton title={editing ? "Guardar cambios" : "Agregar atleta"} onPress={saveAthlete} style={{ flex: 1 }} />
             </View>
             {editing ? <ActionButton title="Eliminar atleta" secondary destructive onPress={() => { closeForm(); deleteAthlete(editing); }} /> : null}
-          </View>
-        </View>
-      </Modal>
+      </BottomSheetModal>
 
-      <Modal visible={Boolean(paymentAthlete)} transparent animationType="slide" onRequestClose={() => setPaymentAthlete(null)}>
-        <View style={styles.modalShade}>
-          <View style={styles.modal}>
+      <BottomSheetModal visible={Boolean(paymentAthlete)} onRequestClose={() => setPaymentAthlete(null)}>
             {paymentAthlete ? (() => {
-              const details = getPaymentDetails(paymentAthlete, state.sessions, month);
+              const details = getPaymentDetails(paymentAthlete, state.sessions, month, state.plans);
               const pendingTotal = details.charges.filter((charge) => !charge.paid).reduce((sum, charge) => sum + charge.amount, 0);
               const paidAll = details.charges.length > 0 && details.charges.every((charge) => charge.paid);
               return <>
@@ -171,7 +183,7 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
                 <ScrollView contentContainerStyle={{ gap: 10 }}>
                   {details.charges.map((charge) => <View key={charge.key} style={[styles.panel, { padding: 12 }]}>
                     <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                      <View style={{ flex: 1, gap: 3 }}><Text style={[styles.body, { fontWeight: "700" }]}>{charge.title}</Text><Text style={styles.small}>{charge.sessions.length ? `${charge.sessions.length} asistencia(s)` : PLANS[paymentAthlete.plan].label}</Text></View>
+                      <View style={{ flex: 1, gap: 3 }}><Text style={[styles.body, { fontWeight: "700" }]}>{charge.title}</Text><Text style={styles.small}>{charge.sessions.length ? `${charge.sessions.length} asistencia(s)` : state.plans[paymentAthlete.plan]?.label ?? "Plan"}</Text></View>
                       <Text style={styles.body}>{money(charge.amount)}</Text>
                       <Switch value={charge.paid} onValueChange={(paid) => actions.updatePaymentRecord(paymentAthlete.id, charge.key, paid)} trackColor={{ true: colors.green }} thumbColor={colors.text} />
                     </View>
@@ -180,9 +192,7 @@ export default function AthletesPage({ paymentFilter = "TODOS", onPaymentFilterC
                 <ActionButton title={paidAll ? "Todos los pagos al día" : "Marcar todo al día"} onPress={() => actions.markAllPaymentsPaid(paymentAthlete.id)} disabled={paidAll} />
               </>;
             })() : null}
-          </View>
-        </View>
-      </Modal>
+      </BottomSheetModal>
     </>
   );
 }

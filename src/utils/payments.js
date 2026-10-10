@@ -16,8 +16,8 @@ const formatMonth = (month) =>
 const isChargeable = (session) =>
   session.status === "PRESENTE" || session.status === "AUSENTE_SIN_AVISO";
 
-export const getPaymentDetails = (athlete, sessions, currentMonth) => {
-  const plan = PLANS[athlete.plan];
+export const getPaymentDetails = (athlete, sessions, currentMonth, plans = PLANS) => {
+  const plan = plans[athlete.plan] ?? PLANS[athlete.plan];
   const records = athlete.paymentRecords ?? {};
   const legacyPaid =
     athlete.payment === "AL_DIA" && Object.keys(records).length === 0;
@@ -26,7 +26,7 @@ export const getPaymentDetails = (athlete, sessions, currentMonth) => {
     .sort((first, second) => first.date.localeCompare(second.date));
   let charges;
 
-  if (athlete.plan === "MENSUAL_DUPLA") {
+  if ((plan.billingType ?? (athlete.plan === "MENSUAL_DUPLA" ? "monthly" : "per_session")) === "monthly") {
     const sessionsByMonth = new Map();
     athleteSessions.forEach((session) => {
       const month = session.date.slice(0, 7);
@@ -77,14 +77,14 @@ export const getPaymentDetails = (athlete, sessions, currentMonth) => {
       };
     }),
     unbilledSessions:
-      athlete.plan === "MENSUAL_DUPLA"
+      (plan.billingType ?? (athlete.plan === "MENSUAL_DUPLA" ? "monthly" : "per_session")) === "monthly"
         ? []
         : athleteSessions.filter((session) => !isChargeable(session)),
   };
 };
 
-export const syncPaymentRecords = (athlete, sessions, currentMonth) => {
-  const details = getPaymentDetails(athlete, sessions, currentMonth);
+export const syncPaymentRecords = (athlete, sessions, currentMonth, plans = PLANS) => {
+  const details = getPaymentDetails(athlete, sessions, currentMonth, plans);
   const existingRecords = athlete.paymentRecords ?? {};
   const legacyPaid =
     athlete.payment === "AL_DIA" && Object.keys(existingRecords).length === 0;
@@ -117,9 +117,9 @@ export const syncPaymentRecords = (athlete, sessions, currentMonth) => {
   return { ...athlete, payment, paymentRecords };
 };
 
-export const summarizePayments = (athletes, sessions, currentMonth) => {
+export const summarizePayments = (athletes, sessions, currentMonth, plans = PLANS) => {
   const charges = athletes.flatMap((athlete) =>
-    getPaymentDetails(athlete, sessions, currentMonth).charges.map(
+    getPaymentDetails(athlete, sessions, currentMonth, plans).charges.map(
       (charge) => ({
         ...charge,
         athleteId: athlete.id,

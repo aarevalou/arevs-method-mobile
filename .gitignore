@@ -3,3 +3,6 @@
 /.expo
 /android
 /ios
+.env
+.env.*
+!.env.example

@@ -1,24 +1,24 @@
 import { Picker } from "@react-native-picker/picker";
-import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export const colors = {
-  background: "#111311",
-  surface: "#1b1e1b",
-  raised: "#232723",
-  border: "#343a34",
-  text: "#f2f1e9",
-  muted: "#a6aaa1",
-  accent: "#e6bd45",
-  green: "#72c49a",
-  red: "#e17e71",
-  amber: "#efb25d",
-  ink: "#151712",
+const PALETTES = {
+  dark: {
+    background: "#0b0b0b", surface: "#1b1b1b", raised: "#141414", border: "#2e2e2e",
+    text: "#ecebe6", muted: "#adadad", accent: "#d4a72c", green: "#5fae7a",
+    red: "#d5645c", amber: "#e0a83a", ink: "#0b0b0b",
+  },
+  light: {
+    background: "#f5f5f3", surface: "#ffffff", raised: "#f0efeb", border: "#d8d5cc",
+    text: "#24231f", muted: "#77746d", accent: "#a8821d", green: "#46855e",
+    red: "#b94c46", amber: "#a9741d", ink: "#ffffff",
+  },
 };
 
-export const styles = StyleSheet.create({
+export let colors = PALETTES.dark;
+const createStyles = () => ({
   safe: { flex: 1, backgroundColor: colors.background },
   page: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 28, gap: 18 },
   header: { gap: 4, marginBottom: 2 },
@@ -38,8 +38,8 @@ export const styles = StyleSheet.create({
   secondaryButtonText: { color: colors.text, fontSize: 13, fontWeight: "700" },
   chip: { minHeight: 36, borderRadius: 18, paddingHorizontal: 13, justifyContent: "center", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   chipCompact: { minHeight: 30, borderRadius: 7, paddingHorizontal: 9 },
-  chipMuted: { borderRadius: 6, borderColor: "#454b49", backgroundColor: "#343936" },
-  chipActive: { borderColor: colors.accent, backgroundColor: "#433a20" },
+  chipMuted: { borderRadius: 6, borderColor: colors.border, backgroundColor: colors.raised },
+  chipActive: { borderColor: colors.accent, backgroundColor: "rgba(212, 167, 44, 0.12)" },
   chipText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
   chipTextActive: { color: colors.accent },
   separator: { height: 1, backgroundColor: colors.border },
@@ -49,6 +49,63 @@ export const styles = StyleSheet.create({
   modalTitle: { color: colors.text, fontSize: 21, fontWeight: "800" },
   status: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 12, backgroundColor: colors.raised },
 });
+export let styles = createStyles();
+export const setNativeTheme = (theme) => {
+  colors = PALETTES[theme === "light" ? "light" : "dark"];
+  styles = createStyles();
+};
+
+export function BottomSheetModal({ visible, onRequestClose, children, contentStyle }) {
+  const { height } = useWindowDimensions();
+  const [mounted, setMounted] = useState(visible);
+  const mountedRef = useRef(visible);
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const sheetOffset = useRef(new Animated.Value(visible ? height : 0)).current;
+  const frame = useRef(null);
+
+  useEffect(() => {
+    if (visible) {
+      mountedRef.current = true;
+      setMounted(true);
+      backdropOpacity.setValue(0);
+      sheetOffset.setValue(height);
+      frame.current = requestAnimationFrame(() => {
+        frame.current = null;
+        Animated.parallel([
+          Animated.timing(backdropOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+          Animated.timing(sheetOffset, { toValue: 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        ]).start();
+      });
+      return () => {
+        if (frame.current !== null) cancelAnimationFrame(frame.current);
+      };
+    }
+    if (mountedRef.current) {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.timing(sheetOffset, { toValue: height, duration: 210, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          mountedRef.current = false;
+          setMounted(false);
+        }
+      });
+    }
+  }, [visible, height, backdropOpacity, sheetOffset]);
+
+  return (
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onRequestClose}>
+      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <Animated.View style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.72)", opacity: backdropOpacity }}>
+          <Pressable onPress={onRequestClose} style={{ flex: 1 }} accessibilityLabel="Cerrar ventana" />
+        </Animated.View>
+        <Animated.View style={[styles.modal, contentStyle, { transform: [{ translateY: sheetOffset }] }]}>
+          {children}
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
 
 export function Screen({ eyebrow, title, subtitle, children, contentStyle }) {
   return (
